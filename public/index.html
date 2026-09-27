@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Generador de puzzles</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #f3f5f8;
+        --panel: #ffffff;
+        --ink: #1b2430;
+        --muted: #64748b;
+        --line: #dbe2ea;
+        --accent: #2563eb;
+        --shadow: 0 10px 30px rgba(15, 23, 42, 0.12);
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #12161c;
+          --panel: #1b212a;
+          --ink: #e8edf4;
+          --muted: #94a3b8;
+          --line: #2b333f;
+          --accent: #60a5fa;
+          --shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+        }
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: var(--bg);
+        color: var(--ink);
+        font: 15px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+        display: grid;
+        grid-template-columns: 340px 1fr;
+      }
+      aside {
+        background: var(--panel);
+        border-right: 1px solid var(--line);
+        padding: 22px 22px 32px;
+        display: flex;
+        flex-direction: column;
+        gap: 18px;
+        overflow-y: auto;
+        max-height: 100vh;
+      }
+      h1 { font-size: 19px; margin: 0; letter-spacing: -0.01em; }
+      .sub { color: var(--muted); font-size: 12.5px; margin: 5px 0 0; }
+      .field { display: flex; flex-direction: column; gap: 6px; }
+      .field > .label { font-size: 13px; font-weight: 600; display: flex; justify-content: space-between; }
+      .field > .label span { color: var(--muted); font-weight: 500; }
+      .pair { display: grid; grid-template-columns: 1fr 96px; gap: 10px; align-items: center; }
+      select {
+        width: 100%;
+        padding: 6px 8px;
+        border: 1px solid var(--line);
+        border-radius: 7px;
+        background: var(--bg);
+        color: var(--ink);
+        font: inherit;
+      }
+      input[type="range"] { width: 100%; accent-color: var(--accent); }
+      input[type="number"] {
+        width: 100%;
+        padding: 5px 8px;
+        border: 1px solid var(--line);
+        border-radius: 7px;
+        background: var(--bg);
+        color: var(--ink);
+        font: inherit;
+        text-align: right;
+      }
+      input[type="number"]:disabled, input[type="range"]:disabled { opacity: 0.45; }
+      .checks { display: flex; gap: 16px; flex-wrap: wrap; }
+      .checks label { display: flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; }
+      .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+      button {
+        font: inherit;
+        font-weight: 600;
+        padding: 9px 12px;
+        border-radius: 9px;
+        border: 1px solid var(--line);
+        background: var(--bg);
+        color: var(--ink);
+        cursor: pointer;
+      }
+      button:hover { border-color: var(--accent); color: var(--accent); }
+      button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+      button.primary:hover { filter: brightness(1.08); color: #fff; }
+      hr { border: 0; border-top: 1px solid var(--line); margin: 0; }
+      .metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+      .metric { background: var(--bg); border-radius: 9px; padding: 9px 11px; }
+      .metric b { display: block; font-size: 16px; }
+      .metric small { color: var(--muted); font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.04em; }
+      details { font-size: 13px; color: var(--muted); }
+      details p { margin: 8px 0 0; }
+      main { display: grid; place-items: center; padding: 32px; }
+      #preview {
+        width: min(100%, 60ch);
+        background: #fff;
+        box-shadow: var(--shadow);
+        border-radius: 4px;
+      }
+      #preview svg { display: block; width: 100%; height: 100%; border-radius: 4px; }
+      #error {
+        display: none;
+        grid-column: 1 / -1;
+        font: 12.5px/1.5 ui-monospace, monospace;
+        color: #b91c1c;
+        white-space: pre-wrap;
+      }
+      @media (max-width: 860px) {
+        body { grid-template-columns: 1fr; }
+        aside { max-height: none; border-right: 0; border-bottom: 1px solid var(--line); }
+        main { padding: 18px; }
+      }
+    </style>
+  </head>
+  <body>
+    <aside>
+      <div>
+        <h1>🧩 Generador de puzzles</h1>
+        <p class="sub">Ancho, largo y nº de piezas → SVG vectorial a escala 1:1 (cm).</p>
+      </div>
+
+      <div class="field">
+        <div class="label">Ancho <span id="w-out"></span></div>
+        <div class="pair">
+          <input type="range" data-pair="w" min="5" max="120" step="0.5" value="30" />
+          <input type="number" data-pair="w" min="5" max="120" step="0.5" value="30" />
+        </div>
+      </div>
+
+      <div class="field">
+        <div class="label">Largo <span id="h-out"></span></div>
+        <div class="pair">
+          <input type="range" data-pair="h" min="5" max="120" step="0.5" value="20" />
+          <input type="number" data-pair="h" min="5" max="120" step="0.5" value="20" />
+        </div>
+      </div>
+
+      <div class="field">
+        <div class="label">Número de piezas <span id="n-out"></span></div>
+        <div class="pair">
+          <input type="range" data-pair="n" min="4" max="600" step="1" value="100" />
+          <input type="number" data-pair="n" min="4" max="600" step="1" value="100" />
+        </div>
+      </div>
+
+      <div class="field">
+        <div class="label">Forma</div>
+        <select id="shape">
+          <option value="rect">Rectángulo</option>
+          <option value="circle">Círculo</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <div class="label">Ondas <span id="wave-out"></span></div>
+        <div class="pair">
+          <input type="range" data-pair="wave" min="0" max="100" step="5" value="0" />
+          <input type="number" data-pair="wave" min="0" max="100" step="5" value="0" />
+        </div>
+      </div>
+
+      <div class="field">
+        <div class="label">Área mín. <span id="minArea-out"></span></div>
+        <div class="pair">
+          <input type="range" data-pair="minArea" min="10" max="100" step="5" value="75" />
+          <input type="number" data-pair="minArea" min="10" max="100" step="5" value="75" />
+        </div>
+      </div>
+
+      <div class="field">
+        <div class="label">Área máx. <span id="maxArea-out"></span></div>
+        <div class="pair">
+          <input type="range" data-pair="maxArea" min="100" max="300" step="10" value="200" />
+          <input type="number" data-pair="maxArea" min="100" max="300" step="10" value="200" />
+        </div>
+      </div>
+
+      <div class="row">
+        <button id="variant" title="Nueva semilla aleatoria">🎲 Variación</button>
+        <input type="number" id="seed" min="0" max="999999" step="1" value="42" />
+      </div>
+
+      <div class="checks">
+        <label><input type="checkbox" id="color" /> Colorear</label>
+        <label><input type="checkbox" id="numbers" /> Numerar</label>
+      </div>
+
+      <hr />
+
+      <div class="metrics">
+        <div class="metric"><small>Piezas</small><b id="m-count">—</b></div>
+        <div class="metric"><small>Cuadrícula</small><b id="m-grid">—</b></div>
+        <div class="metric"><small>Pieza media</small><b id="m-size">—</b></div>
+        <div class="metric"><small>Lámina</small><b id="m-sheet">—</b></div>
+        <div class="metric"><small>Descartadas</small><b id="m-drop">—</b></div>
+      </div>
+
+      <div class="row">
+        <button id="open">Abrir SVG</button>
+        <button id="download" class="primary">⬇️ Descargar</button>
+      </div>
+
+      <details>
+        <summary>Cómo imprimir</summary>
+        <p>
+          1. Descarga el SVG.<br />
+          2. Ábrelo en el navegador o en Inkscape/Illustrator.<br />
+          3. Imprime al <b>100 % de escala</b> (sin «ajustar a la página»).<br />
+          4. Recorta por las líneas: las pestañas encajan entre sí.
+        </p>
+      </details>
+    </aside>
+
+    <main>
+      <div id="preview"></div>
+      <pre id="error"></pre>
+    </main>
+
+    <script type="module" src="/app.js"></script>
+    <script>
+      new EventSource("/__live").addEventListener("message", (e) => {
+        if (e.data === "reload") location.reload();
+      });
+    </script>
+  </body>
+</html>
