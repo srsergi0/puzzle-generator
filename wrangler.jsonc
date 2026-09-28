@@ -1,0 +1,13 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "puzzle-generator",
+  "main": "src/worker.ts",
+  "compatibility_date": "2025-04-01",
+  "account_id": "0dc8b7ebddc579516221b45e7b2d1267",
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "none"
+  },
+  "observability": { "enabled": true }
+}

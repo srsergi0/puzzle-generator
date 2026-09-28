@@ -1,5 +1,4 @@
 import { buildPuzzle, toSvg, type Puzzle } from "./jigsaw.ts";
-import "./organic.ts";
 
 const $ = <T extends Element>(sel: string): T => {
   const el = document.querySelector<T>(sel);
@@ -197,12 +196,7 @@ $<HTMLButtonElement>("#variant").addEventListener("click", () => {
 seedInput.addEventListener("input", schedule);
 colorInput.addEventListener("change", schedule);
 numbersInput.addEventListener("change", schedule);
-shapeSelect.addEventListener("change", () => {
-  // La forma orgánica lleva de serie el corte serpiente (como el puzzle de
-  // referencia); se puede volver a "Clásico" a mano después.
-  if (shapeSelect.value === "organic") styleSelect.value = "organic";
-  schedule();
-});
+shapeSelect.addEventListener("change", schedule);
 styleSelect.addEventListener("change", schedule);
 
 function setPercentPair(kind: string, fraction: number): void {

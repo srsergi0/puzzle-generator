@@ -1,11 +1,12 @@
 import { watch } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { buildPuzzle, generate, toSvg } from "./jigsaw.ts";
-import "./organic.ts";
 
 const PORT = Number(process.env.PORT ?? 4321);
-const PROJECT = fileURLToPath(new URL("..", import.meta.url));
-const ENTRY = new URL("./client.ts", import.meta.url).pathname;
+const SRC = fileURLToPath(new URL("./", import.meta.url));
+const PUBLIC = fileURLToPath(new URL("../public/", import.meta.url));
+const ENTRY = fileURLToPath(new URL("./client.ts", import.meta.url));
+const INDEX = fileURLToPath(new URL("../public/index.html", import.meta.url));
 
 const encoder = new TextEncoder();
 const clients = new Set<ReadableStreamDefaultController<Uint8Array>>();
@@ -21,8 +22,8 @@ function broadcast(event: string): void {
   }
 }
 
-watch(PROJECT + "src", { recursive: true }, () => broadcast("reload"));
-watch(PROJECT + "public", { recursive: true }, () => broadcast("reload"));
+watch(SRC, { recursive: true }, () => broadcast("reload"));
+watch(PUBLIC, { recursive: true }, () => broadcast("reload"));
 
 async function bundleClient(): Promise<Response> {
   const result = await Bun.build({
@@ -95,7 +96,7 @@ const server = Bun.serve({
     switch (url.pathname) {
       case "/":
       case "/index.html":
-        return noStore(new Response(Bun.file(PROJECT + "public/index.html")));
+        return noStore(new Response(Bun.file(INDEX)));
       case "/app.js":
         return noStore(await bundleClient());
       case "/api/puzzle.svg":

@@ -23,9 +23,6 @@ const round2 = (v: number): number => Math.round(v * 100) / 100;
 const num = (v: number): string => String(round2(v));
 const pt = (p: Point): string => `${num(p[0])} ${num(p[1])}`;
 
-/** Paso (mm) de muestreo del borde cuando la lámina se deforma al final. */
-const BORDER_STEP = 3.5;
-
 /** Tramo de path: un punto inicial más segmentos L/C. */
 export class SubPath {
   constructor(
@@ -520,28 +517,197 @@ function clipOpenPath(path: SubPath, clip: Point[], perSeg: number): SubPath[] {
     .map((r) => new SubPath(r[0]!, r.slice(1).map((q): Seg => ({ t: "L", p: q }))));
 }
 
+/** Punto dentro de un polígono simple (par-impar, ray casting). */
+function insidePoly(p: Point, poly: Point[]): boolean {
+  let hit = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const a = poly[i]!;
+    const b = poly[j]!;
+    if (a[1] > p[1] !== b[1] > p[1] && p[0] < ((b[0] - a[0]) * (p[1] - a[1])) / (b[1] - a[1]) + a[0]) {
+      hit = !hit;
+    }
+  }
+  return hit;
+}
+
+/** Distancia mínima de un punto a los bordes de un polígono. */
+function distToPolyBoundary(p: Point, poly: Point[]): number {
+  let best = Infinity;
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i]!;
+    const b = poly[(i + 1) % poly.length]!;
+    const dx = b[0] - a[0];
+    const dy = b[1] - a[1];
+    const len2 = dx * dx + dy * dy;
+    const t = len2 > 0 ? Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / len2)) : 0;
+    const qx = a[0] + dx * t - p[0];
+    const qy = a[1] + dy * t - p[1];
+    const d = Math.hypot(qx, qy);
+    if (d < best) best = d;
+  }
+  return best;
+}
+
+/** Distancia con signo al borde (positiva = dentro). */
+function signedDistToPoly(p: Point, poly: Point[]): number {
+  const d = distToPolyBoundary(p, poly);
+  return insidePoly(p, poly) ? d : -d;
+}
+
+type VNode = {
+  x: number;
+  y: number;
+  next: VNode;
+  prev: VNode;
+  intersect: boolean;
+  entry: boolean;
+  visited: boolean;
+  alpha: number;
+};
+
+function makeVNode(x: number, y: number): VNode {
+  return { x, y, next: null as unknown as VNode, prev: null as unknown as VNode, intersect: false, entry: false, visited: false, alpha: 0 };
+}
+
+function insertAfter(v: VNode, x: number, y: number): VNode {
+  const n = makeVNode(x, y);
+  n.next = v.next;
+  n.prev = v;
+  v.next.prev = n;
+  v.next = n;
+  return n;
+}
+
+/** Intersección de dos segmentos (null si no cruzan). */
+function segInt(p1: Point, p2: Point, p3: Point, p4: Point): [Point, number, number] | null {
+  const d1x = p2[0] - p1[0];
+  const d1y = p2[1] - p1[1];
+  const d2x = p4[0] - p3[0];
+  const d2y = p4[1] - p3[1];
+  const denom = d1x * d2y - d1y * d2x;
+  if (Math.abs(denom) < 1e-12) return null;
+  const t = ((p3[0] - p1[0]) * d2y - (p3[1] - p1[1]) * d2x) / denom;
+  const u = ((p3[0] - p1[0]) * d1y - (p3[1] - p1[1]) * d1x) / denom;
+  if (t <= 1e-9 || t >= 1 - 1e-9 || u <= 1e-9 || u >= 1 - 1e-9) return null;
+  return [[p1[0] + t * d1x, p1[1] + t * d1y], t, u];
+}
+
+/** Clipping Greiner-Hormann: sujeto ∩ clip para polígonos simples (no convexos). */
+export function clipPolygon(subject: Point[], clip: Point[]): Point[] {
+  if (subject.length < 3 || clip.length < 3) return [];
+
+  const subjHead = makeVNode(subject[0]![0], subject[0]![1]);
+  let subjTail = subjHead;
+  for (let i = 1; i < subject.length; i++) {
+    subjTail = insertAfter(subjTail, subject[i]![0], subject[i]![1]);
+  }
+  subjTail.next = subjHead;
+  subjHead.prev = subjTail;
+
+  const clipHead = makeVNode(clip[0]![0], clip[0]![1]);
+  let clipTail = clipHead;
+  for (let i = 1; i < clip.length; i++) {
+    clipTail = insertAfter(clipTail, clip[i]![0], clip[i]![1]);
+  }
+  clipTail.next = clipHead;
+  clipHead.prev = clipTail;
+
+  const processList = (head: VNode): VNode[] => {
+    const ints: VNode[] = [];
+    let v = head;
+    do {
+      let w = v.next;
+      do {
+        const c = head;
+        do {
+          const d = c.next;
+          const hit = segInt([v.x, v.y], [w.x, w.y], [c.x, c.y], [d.x, d.y]);
+          if (hit) {
+            const [pt] = hit;
+            const iv = insertAfter(v, pt[0], pt[1]);
+            const ic = insertAfter(c, pt[0], pt[1]);
+            iv.next = ic;
+            ic.prev = iv;
+            iv.intersect = true;
+            ic.intersect = true;
+          }
+          w = d;
+        } while (w !== head.next);
+        v = v.next;
+      } while (v !== head.next);
+      break;
+    } while (v !== head);
+    return ints;
+  };
+  processList(subjHead);
+  processList(clipHead);
+
+  const markEntry = (head: VNode): void => {
+    let v = head;
+    do {
+      if (v.intersect) {
+        let cur: VNode | null = v;
+        let guard = 0;
+        while (cur && !cur.intersect && guard++ < 10000) cur = cur.next;
+        const ref = cur;
+        v.entry = ref ? !insidePoly([ref.prev.x, ref.prev.y], clip) : false;
+      }
+      v = v.next;
+    } while (v !== head);
+  };
+  markEntry(subjHead);
+
+  const result: Point[] = [];
+  let v: VNode | null = subjHead;
+  let guard = 0;
+  while (v && guard++ < 50000) {
+    v = v.next;
+    if (v === subjHead) break;
+  }
+  const collected: Point[] = [];
+  let start: VNode | null = null;
+  for (let n = subjHead; n; n = n.next) {
+    if (n.intersect && !n.visited) { start = n; break; }
+    if (n.next === subjHead) break;
+  }
+  if (!start) {
+    if (insidePoly([subjHead.x, subjHead.y], clip)) return subject;
+    return [];
+  }
+  let cur: VNode | null = start;
+  let out: Point[] = [];
+  let g2 = 0;
+  while (cur && g2++ < 50000) {
+    cur.visited = true;
+    out.push([cur.x, cur.y]);
+    let nxt: VNode;
+    if (cur.intersect) {
+      nxt = cur.entry ? cur.next : cur.prev;
+      let s: VNode | null = cur;
+      let gg = 0;
+      while (s && gg++ < 50000) {
+        if (s !== cur && s.intersect) break;
+        s = s.entry ? s.next : s.prev;
+      }
+    } else {
+      nxt = cur.next;
+    }
+    cur = nxt;
+    if (cur === start) break;
+    if (!cur) break;
+  }
+  void collected;
+  void result;
+  if (out.length >= 3) return out;
+  return [];
+}
+
 /** Polígono -> SubPath cerrado (para dibujar la pieza ya recortada). */
 function polygonPath(poly: Point[]): SubPath {
   if (poly.length === 0) return SubPath.of([0, 0]);
   const segs: Seg[] = poly.slice(1).map((p): Seg => ({ t: "L", p }));
   segs.push({ t: "L", p: poly[0]! });
   return new SubPath(poly[0]!, segs);
-}
-
-/** Perímetro del rectángulo muestreado (sentido horario), para ondularlo. */
-function rectBorder(width: number, height: number): Point[] {
-  const pts: Point[] = [];
-  const side = (ax: number, ay: number, bx: number, by: number): void => {
-    const n = Math.max(1, Math.ceil(Math.hypot(bx - ax, by - ay) / BORDER_STEP));
-    for (let i = 0; i < n; i++) {
-      pts.push([ax + ((bx - ax) * i) / n, ay + ((by - ay) * i) / n]);
-    }
-  };
-  side(0, 0, width, 0);
-  side(width, 0, width, height);
-  side(width, height, 0, height);
-  side(0, height, 0, 0);
-  return pts;
 }
 
 /** ¿La caja del polígono cae entera dentro del recorte? (atajo sin recortar) */
@@ -571,14 +737,6 @@ export interface Shape {
   coverage(width: number, height: number): number;
   /** Polígono convexo de recorte, en mm y en sentido horario. */
   clip(width: number, height: number): Point[];
-  /**
-   * Deformación final (opcional): se aplica a todos los puntos del puzzle
-   * después de construirlo, una sola vez por punto. Permite contornos no
-   * convexos (p. ej. la lámina "orgánica") sin tocar el recorte convexo:
-   * la geometría se calcula dentro del rectángulo y solo al final se ondula.
-   * Debe ser un homeomorfismo suave para que las piezas sigan encajando.
-   */
-  postWarp?(width: number, height: number, seed: number): ((p: Point) => Point) | undefined;
 }
 
 const CIRCLE_STEPS = 72;
@@ -692,22 +850,20 @@ export function generate(
   const cellW = width / cols;
   const cellH = height / rows;
 
-  const warp =
-    wave > 1e-6 ? makeWarp(wave, width, height, cellW, cellH, cols, rows, rng) : null;
+  const style = getCutStyle(opts.style);
+  const shape = getShape(opts.shape);
+  const warp = wave > 1e-6 ? makeWarp(wave, width, height, cellW, cellH, cols, rows, rng) : null;
 
   const W = (p: Point): Point => (warp ? warp(p) : p);
 
-  const shape = getShape(opts.shape);
   const minArea = Math.max(0, Math.min(1, opts.minArea ?? 0.75));
   const maxArea = Math.max(minArea, opts.maxArea ?? 4);
   const cellArea = cellW * cellH;
   const cellCount = rows * cols;
   const clip = shape.id === "rect" ? null : shape.clip(width, height);
   const depth = clip ? (p: Point): number => convexDepth(p, clip) : undefined;
-  const postWarp = shape.postWarp?.(width, height, seed);
 
   const ctx: EdgeContext = { rng, tabRate, warp, sheetW: width, sheetH: height, depth };
-  const style = getCutStyle(opts.style);
   const buildEdge = (
     a: Point,
     b: Point,
@@ -738,34 +894,15 @@ export function generate(
     }
   }
 
-  // Borde de la lámina. Si la forma se deforma al final (postWarp), el borde
-  // se muestrea denso para que, tras ondularse, siga la curva del contorno.
-  const dense = (a: Point, b: Point): Seg[] => {
-    if (!postWarp) return [{ t: "L", p: b }];
-    const n = Math.max(
-      1,
-      Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / BORDER_STEP),
-    );
-    const segs: Seg[] = [];
-    for (let i = 1; i <= n; i++) {
-      segs.push({ t: "L", p: [a[0] + ((b[0] - a[0]) * i) / n, a[1] + ((b[1] - a[1]) * i) / n] });
-    }
-    return segs;
-  };
-
   const cornerW = (r: number, c: number): Point => W([xs[c]!, ys[r]!]);
-  const hEdge = (r: number, c: number): SubPath => {
-    if (r !== 0 && r !== rows) return hedges.get(hKey(r, c))!;
-    const a = cornerW(r, c);
-    const b = cornerW(r, c + 1);
-    return new SubPath(a, dense(a, b));
-  };
-  const vEdge = (r: number, c: number): SubPath => {
-    if (c !== 0 && c !== cols) return vedges.get(hKey(r, c))!;
-    const a = cornerW(r, c);
-    const b = cornerW(r + 1, c);
-    return new SubPath(a, dense(a, b));
-  };
+  const hEdge = (r: number, c: number): SubPath =>
+    r === 0 || r === rows
+      ? new SubPath(cornerW(r, c), [{ t: "L", p: cornerW(r, c + 1) }])
+      : hedges.get(hKey(r, c))!;
+  const vEdge = (r: number, c: number): SubPath =>
+    c === 0 || c === cols
+      ? new SubPath(cornerW(r, c), [{ t: "L", p: cornerW(r + 1, c) }])
+      : vedges.get(hKey(r, c))!;
 
   // Contorno de una región: las caras que dan a otra región (o al exterior) se
   // incluyen; las interiores (fusionadas) desaparecen.
@@ -1070,46 +1207,7 @@ export function generate(
     for (const run of clipOpenPath(path, clip, 6)) pushCut(run);
   }
 
-  // Deformación final (contorno orgánico): se aplica una sola vez por punto y
-  // por segmento originales, así las piezas y sus cortes comparten la misma
-  // geometría deformada y siguen encajando sin huecos.
-  if (postWarp) {
-    const pCache = new Map<Point, Point>();
-    const sCache = new Map<Seg, Seg>();
-    const wp = (p: Point): Point => {
-      let q = pCache.get(p);
-      if (!q) {
-        q = postWarp(p);
-        pCache.set(p, q);
-      }
-      return q;
-    };
-    const ws = (s: Seg): Seg => {
-      let q = sCache.get(s);
-      if (!q) {
-        q = s.t === "L"
-          ? { t: "L", p: wp(s.p) }
-          : { t: "C", c1: wp(s.c1), c2: wp(s.c2), p: wp(s.p) };
-        sCache.set(s, q);
-      }
-      return q;
-    };
-    const wpath = (path: SubPath): SubPath => new SubPath(wp(path.start), path.segs.map(ws));
-    for (const piece of pieces) {
-      piece.path = wpath(piece.path);
-      piece.center = wp(piece.center);
-    }
-    for (let i = 0; i < cuts.length; i++) cuts[i] = wpath(cuts[i]!);
-  }
-
-  if (clip) {
-    // Contorno: si la lámina se deforma, se muestrea el rectángulo denso y se
-    // ondula con el mismo campo que las piezas (coincide con sus bordes).
-    const outline = postWarp
-      ? rectBorder(width, height).map((p) => postWarp(p))
-      : clip;
-    pushCut(polygonPath(outline));
-  }
+  if (clip) pushCut(polygonPath(clip));
 
   return { widthCm, heightCm, rows, cols, seed, pieces, cuts, dropped };
 }

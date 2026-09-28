@@ -4,6 +4,7 @@
   "description": "Generador de puzzles en SVG 1:1 para corte láser: medidas en cm + nº de piezas → vector con pestañas, ondas y formas rect/círculo. Jigsaw puzzle generator, laser-ready (Bun + TypeScript)",
   "type": "module",
   "private": true,
+  "packageManager": "bun@1.2.15",
   "scripts": {
     "dev": "bun --hot src/server.ts",
     "dev:bg": "bun run scripts/dev.ts bg",
@@ -12,11 +13,15 @@
     "dev:logs": "bun run scripts/dev.ts logs",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
-    "build": "bun build src/client.ts --outdir dist --target browser --minify"
+    "build": "bun build src/client.ts --outdir dist --target browser --minify",
+    "build:assets": "bun run scripts/build-assets.ts",
+    "deploy": "bun run build:assets && wrangler deploy",
+    "preview": "bun run build:assets && wrangler dev"
   },
   "devDependencies": {
     "@types/bun": "latest",
-    "typescript": "latest"
+    "typescript": "latest",
+    "wrangler": "^4"
   },
   "engines": {
     "bun": ">=1.4.0"
