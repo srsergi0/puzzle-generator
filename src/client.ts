@@ -1,4 +1,5 @@
 import { buildPuzzle, toSvg, type Puzzle } from "./jigsaw.ts";
+import "./organic.ts";
 
 const $ = <T extends Element>(sel: string): T => {
   const el = document.querySelector<T>(sel);
@@ -12,6 +13,7 @@ const seedInput = $<HTMLInputElement>("#seed");
 const colorInput = $<HTMLInputElement>("#color");
 const numbersInput = $<HTMLInputElement>("#numbers");
 const shapeSelect = $<HTMLSelectElement>("#shape");
+const styleSelect = $<HTMLSelectElement>("#style");
 
 const out: Record<"w" | "h" | "n" | "wave" | "minArea" | "maxArea", HTMLElement> = {
   w: $<HTMLElement>("#w-out"),
@@ -76,6 +78,7 @@ interface State {
   minArea: number;
   maxArea: number;
   shape: string;
+  style: string;
   seed: number;
   color: boolean;
   numbers: boolean;
@@ -90,6 +93,7 @@ function readState(): State {
     minArea: readMinArea() / 100,
     maxArea: readMaxArea() / 100,
     shape: shapeSelect.value,
+    style: styleSelect.value,
     seed: Math.max(0, Math.trunc(Number(seedInput.value) || 0)),
     color: colorInput.checked,
     numbers: numbersInput.checked,
@@ -121,6 +125,7 @@ function render(): void {
       seed: state.seed,
       wave: state.wave,
       shape: state.shape,
+      style: state.style,
       minArea: state.minArea,
       maxArea: state.maxArea,
     });
@@ -192,7 +197,13 @@ $<HTMLButtonElement>("#variant").addEventListener("click", () => {
 seedInput.addEventListener("input", schedule);
 colorInput.addEventListener("change", schedule);
 numbersInput.addEventListener("change", schedule);
-shapeSelect.addEventListener("change", schedule);
+shapeSelect.addEventListener("change", () => {
+  // La forma orgánica lleva de serie el corte serpiente (como el puzzle de
+  // referencia); se puede volver a "Clásico" a mano después.
+  if (shapeSelect.value === "organic") styleSelect.value = "organic";
+  schedule();
+});
+styleSelect.addEventListener("change", schedule);
 
 function setPercentPair(kind: string, fraction: number): void {
   const inputs = pairInputs(kind);
@@ -219,6 +230,9 @@ function applyHash(): void {
   if (p.has("maxArea")) setPercentPair("maxArea", Number(p.get("maxArea")));
   if (p.has("shape") && shapeSelect.querySelector(`option[value="${p.get("shape")}"]`)) {
     shapeSelect.value = p.get("shape")!;
+  }
+  if (p.has("style") && styleSelect.querySelector(`option[value="${p.get("style")}"]`)) {
+    styleSelect.value = p.get("style")!;
   }
   if (p.has("seed")) seedInput.value = String(Math.trunc(Number(p.get("seed"))));
   colorInput.checked = p.get("color") === "1";

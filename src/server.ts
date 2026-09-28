@@ -1,6 +1,7 @@
 import { watch } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { buildPuzzle, generate, toSvg } from "./jigsaw.ts";
+import "./organic.ts";
 
 const PORT = Number(process.env.PORT ?? 4321);
 const PROJECT = fileURLToPath(new URL("..", import.meta.url));
@@ -54,10 +55,11 @@ function puzzleSvg(url: URL): Response {
   const seed = q.get("seed") ? Math.trunc(Number(q.get("seed"))) : undefined;
   const wave = q.get("wave") ? Number(q.get("wave")) : 0;
   const shape = q.get("shape") ?? "rect";
+  const style = q.get("style") ?? undefined;
   const minArea = q.get("minArea") ? Number(q.get("minArea")) : 0.75;
   const maxArea = q.get("maxArea") ? Number(q.get("maxArea")) : 4;
 
-  const opts = { seed, wave, shape, minArea, maxArea };
+  const opts = { seed, wave, shape, style, minArea, maxArea };
   const puzzle =
     rows && cols
       ? generate(widthCm, heightCm, rows, cols, opts)

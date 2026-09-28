@@ -23,6 +23,9 @@ const round2 = (v: number): number => Math.round(v * 100) / 100;
 const num = (v: number): string => String(round2(v));
 const pt = (p: Point): string => `${num(p[0])} ${num(p[1])}`;
 
+/** Paso (mm) de muestreo del borde cuando la lámina se deforma al final. */
+const BORDER_STEP = 3.5;
+
 /** Tramo de path: un punto inicial más segmentos L/C. */
 export class SubPath {
   constructor(
@@ -66,7 +69,7 @@ export class SubPath {
 const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
 
 /** Catmull-Rom -> cúbicas, para que la pestaña salga redonda. */
-function smooth(points: Point[]): Seg[] {
+export function smooth(points: Point[]): Seg[] {
   const n = points.length;
   if (n < 2) return [];
   const segs: Seg[] = [];
@@ -519,10 +522,26 @@ function clipOpenPath(path: SubPath, clip: Point[], perSeg: number): SubPath[] {
 
 /** Polígono -> SubPath cerrado (para dibujar la pieza ya recortada). */
 function polygonPath(poly: Point[]): SubPath {
-  const segs: Seg[] = [];
-  for (let i = 1; i < poly.length; i++) segs.push({ t: "L", p: poly[i]! });
+  if (poly.length === 0) return SubPath.of([0, 0]);
+  const segs: Seg[] = poly.slice(1).map((p): Seg => ({ t: "L", p }));
   segs.push({ t: "L", p: poly[0]! });
   return new SubPath(poly[0]!, segs);
+}
+
+/** Perímetro del rectángulo muestreado (sentido horario), para ondularlo. */
+function rectBorder(width: number, height: number): Point[] {
+  const pts: Point[] = [];
+  const side = (ax: number, ay: number, bx: number, by: number): void => {
+    const n = Math.max(1, Math.ceil(Math.hypot(bx - ax, by - ay) / BORDER_STEP));
+    for (let i = 0; i < n; i++) {
+      pts.push([ax + ((bx - ax) * i) / n, ay + ((by - ay) * i) / n]);
+    }
+  };
+  side(0, 0, width, 0);
+  side(width, 0, width, height);
+  side(width, height, 0, height);
+  side(0, height, 0, 0);
+  return pts;
 }
 
 /** ¿La caja del polígono cae entera dentro del recorte? (atajo sin recortar) */
@@ -552,6 +571,14 @@ export interface Shape {
   coverage(width: number, height: number): number;
   /** Polígono convexo de recorte, en mm y en sentido horario. */
   clip(width: number, height: number): Point[];
+  /**
+   * Deformación final (opcional): se aplica a todos los puntos del puzzle
+   * después de construirlo, una sola vez por punto. Permite contornos no
+   * convexos (p. ej. la lámina "orgánica") sin tocar el recorte convexo:
+   * la geometría se calcula dentro del rectángulo y solo al final se ondula.
+   * Debe ser un homeomorfismo suave para que las piezas sigan encajando.
+   */
+  postWarp?(width: number, height: number, seed: number): ((p: Point) => Point) | undefined;
 }
 
 const CIRCLE_STEPS = 72;
@@ -593,6 +620,27 @@ export function getShape(id: string | undefined): Shape {
   return (id && SHAPES[id]) || SHAPES.rect!;
 }
 
+/**
+ * Estilo de corte: cómo se dibuja el borde entre dos celdas. El path que
+ * devuelve lo comparten las dos piezas vecinas, así que encajan siempre.
+ */
+export interface CutStyle {
+  id: string;
+  label: string;
+  edge(p0: Point, p1: Point, normal: Point, sign: number, perp: number, ctx: EdgeContext): SubPath;
+}
+
+export const CUT_STYLES: Record<string, CutStyle> = {};
+
+/** Permite añadir estilos de corte (p. ej. el serpiente) sin tocar el core. */
+export function registerCutStyle(style: CutStyle): void {
+  CUT_STYLES[style.id] = style;
+}
+
+export function getCutStyle(id: string | undefined): CutStyle | undefined {
+  return id ? CUT_STYLES[id] : undefined;
+}
+
 export interface Piece {
   index: number;
   row: number;
@@ -618,6 +666,7 @@ export interface GenerateOptions {
   tabRate?: number;
   wave?: number;
   shape?: string;
+  style?: string;
   minArea?: number;
   maxArea?: number;
 }
@@ -655,8 +704,17 @@ export function generate(
   const cellCount = rows * cols;
   const clip = shape.id === "rect" ? null : shape.clip(width, height);
   const depth = clip ? (p: Point): number => convexDepth(p, clip) : undefined;
+  const postWarp = shape.postWarp?.(width, height, seed);
 
   const ctx: EdgeContext = { rng, tabRate, warp, sheetW: width, sheetH: height, depth };
+  const style = getCutStyle(opts.style);
+  const buildEdge = (
+    a: Point,
+    b: Point,
+    n: Point,
+    s: number,
+    p: number,
+  ): SubPath => (style ? style.edge(a, b, n, s, p, ctx) : edge(a, b, n, s, p, ctx));
   const hKey = (r: number, c: number): string => `${r},${c}`;
   const hedges = new Map<string, SubPath>();
   for (let r = 1; r < rows; r++) {
@@ -664,7 +722,7 @@ export function generate(
       const sign = rng() < 0.5 ? 1 : -1;
       hedges.set(
         hKey(r, c),
-        edge([xs[c]!, ys[r]!], [xs[c + 1]!, ys[r]!], [0, 1], sign, cellH, ctx),
+        buildEdge([xs[c]!, ys[r]!], [xs[c + 1]!, ys[r]!], [0, 1], sign, cellH),
       );
     }
   }
@@ -675,20 +733,39 @@ export function generate(
       const sign = rng() < 0.5 ? 1 : -1;
       vedges.set(
         hKey(r, c),
-        edge([xs[c]!, ys[r]!], [xs[c]!, ys[r + 1]!], [1, 0], sign, cellW, ctx),
+        buildEdge([xs[c]!, ys[r]!], [xs[c]!, ys[r + 1]!], [1, 0], sign, cellW),
       );
     }
   }
 
+  // Borde de la lámina. Si la forma se deforma al final (postWarp), el borde
+  // se muestrea denso para que, tras ondularse, siga la curva del contorno.
+  const dense = (a: Point, b: Point): Seg[] => {
+    if (!postWarp) return [{ t: "L", p: b }];
+    const n = Math.max(
+      1,
+      Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / BORDER_STEP),
+    );
+    const segs: Seg[] = [];
+    for (let i = 1; i <= n; i++) {
+      segs.push({ t: "L", p: [a[0] + ((b[0] - a[0]) * i) / n, a[1] + ((b[1] - a[1]) * i) / n] });
+    }
+    return segs;
+  };
+
   const cornerW = (r: number, c: number): Point => W([xs[c]!, ys[r]!]);
-  const hEdge = (r: number, c: number): SubPath =>
-    r === 0 || r === rows
-      ? new SubPath(cornerW(r, c), [{ t: "L", p: cornerW(r, c + 1) }])
-      : hedges.get(hKey(r, c))!;
-  const vEdge = (r: number, c: number): SubPath =>
-    c === 0 || c === cols
-      ? new SubPath(cornerW(r, c), [{ t: "L", p: cornerW(r + 1, c) }])
-      : vedges.get(hKey(r, c))!;
+  const hEdge = (r: number, c: number): SubPath => {
+    if (r !== 0 && r !== rows) return hedges.get(hKey(r, c))!;
+    const a = cornerW(r, c);
+    const b = cornerW(r, c + 1);
+    return new SubPath(a, dense(a, b));
+  };
+  const vEdge = (r: number, c: number): SubPath => {
+    if (c !== 0 && c !== cols) return vedges.get(hKey(r, c))!;
+    const a = cornerW(r, c);
+    const b = cornerW(r + 1, c);
+    return new SubPath(a, dense(a, b));
+  };
 
   // Contorno de una región: las caras que dan a otra región (o al exterior) se
   // incluyen; las interiores (fusionadas) desaparecen.
@@ -992,7 +1069,47 @@ export function generate(
     }
     for (const run of clipOpenPath(path, clip, 6)) pushCut(run);
   }
-  if (clip) pushCut(polygonPath(clip));
+
+  // Deformación final (contorno orgánico): se aplica una sola vez por punto y
+  // por segmento originales, así las piezas y sus cortes comparten la misma
+  // geometría deformada y siguen encajando sin huecos.
+  if (postWarp) {
+    const pCache = new Map<Point, Point>();
+    const sCache = new Map<Seg, Seg>();
+    const wp = (p: Point): Point => {
+      let q = pCache.get(p);
+      if (!q) {
+        q = postWarp(p);
+        pCache.set(p, q);
+      }
+      return q;
+    };
+    const ws = (s: Seg): Seg => {
+      let q = sCache.get(s);
+      if (!q) {
+        q = s.t === "L"
+          ? { t: "L", p: wp(s.p) }
+          : { t: "C", c1: wp(s.c1), c2: wp(s.c2), p: wp(s.p) };
+        sCache.set(s, q);
+      }
+      return q;
+    };
+    const wpath = (path: SubPath): SubPath => new SubPath(wp(path.start), path.segs.map(ws));
+    for (const piece of pieces) {
+      piece.path = wpath(piece.path);
+      piece.center = wp(piece.center);
+    }
+    for (let i = 0; i < cuts.length; i++) cuts[i] = wpath(cuts[i]!);
+  }
+
+  if (clip) {
+    // Contorno: si la lámina se deforma, se muestrea el rectángulo denso y se
+    // ondula con el mismo campo que las piezas (coincide con sus bordes).
+    const outline = postWarp
+      ? rectBorder(width, height).map((p) => postWarp(p))
+      : clip;
+    pushCut(polygonPath(outline));
+  }
 
   return { widthCm, heightCm, rows, cols, seed, pieces, cuts, dropped };
 }
