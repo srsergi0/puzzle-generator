@@ -13,7 +13,7 @@
     "dev:logs": "bun run scripts/dev.ts logs",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
-    "build": "bun build src/client.ts --outdir dist --target browser --minify",
+    "build": "bun run build:assets",
     "build:assets": "bun run scripts/build-assets.ts",
     "deploy": "bun run build:assets && wrangler deploy",
     "preview": "bun run build:assets && wrangler dev"

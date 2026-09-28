@@ -4,6 +4,9 @@
   "main": "src/worker.ts",
   "compatibility_date": "2025-04-01",
   "account_id": "0dc8b7ebddc579516221b45e7b2d1267",
+  "build": {
+    "command": "bun run build:assets || npx bun run build:assets"
+  },
   "assets": {
     "directory": "./dist",
     "binding": "ASSETS",
