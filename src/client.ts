@@ -1,4 +1,5 @@
-import { buildPuzzle, toSvg, type Puzzle } from "./jigsaw.ts";
+import { shapeFromPng, shapeFromSvg } from "./image-shape.ts";
+import { buildPuzzle, toSvg, getShape, polygonPath, type Puzzle, type Shape } from "./jigsaw/index.ts";
 
 const $ = <T extends Element>(sel: string): T => {
   const el = document.querySelector<T>(sel);
@@ -13,6 +14,16 @@ const colorInput = $<HTMLInputElement>("#color");
 const numbersInput = $<HTMLInputElement>("#numbers");
 const shapeSelect = $<HTMLSelectElement>("#shape");
 const styleSelect = $<HTMLSelectElement>("#style");
+const imageInput = $<HTMLInputElement>("#image-shape-input");
+const uploadBtn = $<HTMLButtonElement>("#upload-image-btn");
+const imageInfo = $<HTMLElement>("#image-shape-info");
+const imageOpacityBox = $<HTMLDivElement>("#image-opacity-box");
+const imgThumb = $<HTMLImageElement>("#img-thumb");
+const imgOpacityRange = $<HTMLInputElement>("#img-opacity");
+const imgOpacityNum = $<HTMLInputElement>("#img-opacity-num");
+const imgOpacityOut = $<HTMLElement>("#img-opacity-out");
+
+let currentImageUrl: string | null = null;
 
 const out: Record<"w" | "h" | "n" | "wave" | "minArea" | "maxArea", HTMLElement> = {
   w: $<HTMLElement>("#w-out"),
@@ -29,6 +40,15 @@ function pairInputs(kind: string): HTMLInputElement[] {
   return Array.from(document.querySelectorAll<HTMLInputElement>(`input[data-pair="${kind}"]`));
 }
 
+function updateOutBadge(kind: string, val: number): void {
+  if (kind === "w") out.w.textContent = `${val} cm`;
+  else if (kind === "h") out.h.textContent = `${val} cm`;
+  else if (kind === "n") out.n.textContent = `${val} solicitadas`;
+  else if (kind === "wave") out.wave.textContent = `${Math.round(val)} %`;
+  else if (kind === "minArea") out.minArea.textContent = `${Math.round(val)} %`;
+  else if (kind === "maxArea") out.maxArea.textContent = `${Math.round(val)} %`;
+}
+
 /** Slider y campo numérico espejados; devuelve cómo leer el valor actual. */
 function wirePair(kind: string): () => number {
   const inputs = pairInputs(kind);
@@ -39,7 +59,13 @@ function wirePair(kind: string): () => number {
 
   range.addEventListener("input", () => {
     number.value = range.value;
-    schedule();
+    updateOutBadge(kind, Number(range.value));
+    schedule(160);
+  });
+
+  range.addEventListener("change", () => {
+    updateOutBadge(kind, Number(range.value));
+    schedule(0);
   });
 
   number.addEventListener("input", () => {
@@ -47,7 +73,8 @@ function wirePair(kind: string): () => number {
     if (number.value === "" || !Number.isFinite(v)) return;
     if (v >= lo && v <= hi) {
       range.value = String(v);
-      schedule();
+      updateOutBadge(kind, v);
+      schedule(220);
     }
   });
 
@@ -56,7 +83,8 @@ function wirePair(kind: string): () => number {
     const v = Number.isFinite(raw) ? clamp(raw, lo, hi) : Number(range.value);
     number.value = String(v);
     range.value = String(v);
-    schedule();
+    updateOutBadge(kind, v);
+    schedule(0);
   });
 
   return () => Number(range.value);
@@ -128,7 +156,31 @@ function render(): void {
       minArea: state.minArea,
       maxArea: state.maxArea,
     });
-    const svg = toSvg(puzzle, { color: state.color, numbers: state.numbers });
+    const shapeObj = getShape(state.shape);
+    let imageOverlay = undefined;
+    const opacityPct = Number(imgOpacityRange.value);
+    if (state.shape === "image" && shapeObj.imageMeta && opacityPct > 0) {
+      const { dataUrl, minX, minY, boxW, boxH, origW, origH } = shapeObj.imageMeta;
+      const sheetW = state.w * 10;
+      const sheetH = state.h * 10;
+      const scale = Math.min(sheetW / boxW, sheetH / boxH);
+      const scaledW = boxW * scale;
+      const scaledH = boxH * scale;
+      const offsetX = (sheetW - scaledW) / 2;
+      const offsetY = (sheetH - scaledH) / 2;
+      const clipPts = shapeObj.clip(sheetW, sheetH);
+      const clipPathD = polygonPath(clipPts).toD();
+      imageOverlay = {
+        href: dataUrl,
+        opacity: opacityPct / 100,
+        x: offsetX - minX * scale,
+        y: offsetY - minY * scale,
+        width: origW * scale,
+        height: origH * scale,
+        clipPathD,
+      };
+    }
+    const svg = toSvg(puzzle, { color: state.color, numbers: state.numbers, imageOverlay });
     preview.innerHTML = svg;
     current = { puzzle, svg };
     errorEl.style.display = "none";
@@ -163,14 +215,32 @@ function render(): void {
   seedInput.value = String(state.seed);
 }
 
-let queued = false;
-function schedule(): void {
-  if (queued) return;
-  queued = true;
-  requestAnimationFrame(() => {
-    queued = false;
-    render();
-  });
+let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+let animFrame: number | null = null;
+
+function schedule(delayMs = 160): void {
+  if (debounceTimer !== null) {
+    clearTimeout(debounceTimer);
+    debounceTimer = null;
+  }
+  if (animFrame !== null) {
+    cancelAnimationFrame(animFrame);
+    animFrame = null;
+  }
+  if (delayMs <= 0) {
+    animFrame = requestAnimationFrame(() => {
+      animFrame = null;
+      render();
+    });
+  } else {
+    debounceTimer = setTimeout(() => {
+      debounceTimer = null;
+      animFrame = requestAnimationFrame(() => {
+        animFrame = null;
+        render();
+      });
+    }, delayMs);
+  }
 }
 
 function download(): void {
@@ -186,18 +256,93 @@ function download(): void {
 
 $<HTMLButtonElement>("#download").addEventListener("click", download);
 $<HTMLButtonElement>("#open").addEventListener("click", () => {
-  window.open(`/api/puzzle.svg?${query(readState())}`, "_blank");
+  if (current && current.svg) {
+    const blob = new Blob([current.svg], { type: "image/svg+xml" });
+    const url = URL.createObjectURL(blob);
+    window.open(url, "_blank");
+  } else {
+    window.open(`/api/puzzle.svg?${query(readState())}`, "_blank");
+  }
 });
 $<HTMLButtonElement>("#variant").addEventListener("click", () => {
   seedInput.value = String(Math.floor(Math.random() * 1_000_000));
-  schedule();
+  schedule(0);
 });
 
-seedInput.addEventListener("input", schedule);
-colorInput.addEventListener("change", schedule);
-numbersInput.addEventListener("change", schedule);
-shapeSelect.addEventListener("change", schedule);
-styleSelect.addEventListener("change", schedule);
+uploadBtn.addEventListener("click", () => imageInput.click());
+
+imageInput.addEventListener("change", async () => {
+  const file = imageInput.files?.[0];
+  if (!file) return;
+  try {
+    uploadBtn.disabled = true;
+    uploadBtn.textContent = "⏳ Procesando archivo...";
+    if (currentImageUrl) URL.revokeObjectURL(currentImageUrl);
+    currentImageUrl = URL.createObjectURL(file);
+    imgThumb.src = currentImageUrl;
+
+    const isSvg = file.type === "image/svg+xml" || file.name.toLowerCase().endsWith(".svg");
+    const label = file.name.replace(/\.[^.]+$/, "") || (isSvg ? "SVG" : "PNG");
+    let shape: Shape;
+
+    if (isSvg) {
+      const text = await file.text();
+      shape = shapeFromSvg(text, { id: "image", label, dataUrl: currentImageUrl });
+    } else {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      shape = await shapeFromPng(bytes, { id: "image", label, dataUrl: currentImageUrl });
+    }
+
+    let opt = shapeSelect.querySelector<HTMLOptionElement>('option[value="image"]');
+    if (!opt) {
+      opt = document.createElement("option");
+      opt.value = "image";
+      shapeSelect.appendChild(opt);
+    }
+    opt.textContent = `🖼️ ${shape.label}`;
+    shapeSelect.value = "image";
+
+    imageInfo.textContent = `Silueta: ${shape.label} (${isSvg ? "SVG" : "PNG"})`;
+    imageInfo.style.display = "block";
+    imageOpacityBox.style.display = "block";
+    errorEl.style.display = "none";
+    schedule();
+  } catch (err) {
+    errorEl.textContent = `Error al procesar el archivo: ${err instanceof Error ? err.message : String(err)}`;
+    errorEl.style.display = "block";
+  } finally {
+    uploadBtn.disabled = false;
+    uploadBtn.textContent = "🖼️ Cargar silueta (PNG / SVG)";
+    imageInput.value = "";
+  }
+});
+
+function onOpacityChange(valStr: string): void {
+  const val = clamp(Number(valStr) || 0, 0, 100);
+  imgOpacityRange.value = String(val);
+  imgOpacityNum.value = String(val);
+  imgOpacityOut.textContent = `${val}%`;
+  const overlay = preview.querySelector<SVGGElement>("#svg-image-overlay");
+  if (overlay) {
+    overlay.setAttribute("opacity", String(val / 100));
+    overlay.style.display = val === 0 ? "none" : "block";
+  } else {
+    schedule();
+  }
+}
+
+imgOpacityRange.addEventListener("input", () => onOpacityChange(imgOpacityRange.value));
+imgOpacityNum.addEventListener("input", () => onOpacityChange(imgOpacityNum.value));
+
+seedInput.addEventListener("input", () => schedule(200));
+seedInput.addEventListener("change", () => schedule(0));
+colorInput.addEventListener("change", () => schedule(0));
+numbersInput.addEventListener("change", () => schedule(0));
+shapeSelect.addEventListener("change", () => {
+  imageOpacityBox.style.display = shapeSelect.value === "image" && currentImageUrl ? "block" : "none";
+  schedule(0);
+});
+styleSelect.addEventListener("change", () => schedule(0));
 
 function setPercentPair(kind: string, fraction: number): void {
   const inputs = pairInputs(kind);

@@ -58,7 +58,8 @@ GET /api/puzzle.svg?w=30&h=20&n=48&shape=circle&seed=42&wave=0.5&color=1&numbers
 | Archivo | Responsabilidad |
 |---|---|
 | `src/grid.ts` | `planGrid(target, aspect)` → filas × columnas |
-| `src/jigsaw.ts` | pestañas, ondas, fusión de regiones, recorte por forma, capa de cortes |
+| `src/jigsaw/` | motor del puzzle fragmentado por responsabilidades (ver `BITACORA.md`) |
+| `src/image-shape.ts` | siluetas desde PNG: decodificación, contorno, `Shape` |
 | `src/organic.ts` | forma "orgánica" (contorno ondulado) y estilo "serpiente" (auto-registrados) |
 | `src/server.ts` | `Bun.serve`, bundle del cliente al vuelo, recarga en vivo |
 | `src/client.ts` | interfaz: controles, previsualización, métricas, descarga |

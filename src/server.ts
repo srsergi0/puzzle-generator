@@ -1,6 +1,6 @@
 import { watch } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { buildPuzzle, generate, toSvg } from "./jigsaw.ts";
+import { buildPuzzle, generate, toSvg } from "./jigsaw/index.ts";
 
 const PORT = Number(process.env.PORT ?? 4321);
 const SRC = fileURLToPath(new URL("./", import.meta.url));

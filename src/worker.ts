@@ -1,4 +1,4 @@
-import { buildPuzzle, generate, toSvg } from "./jigsaw.ts";
+import { buildPuzzle, generate, toSvg } from "./jigsaw/index.ts";
 
 interface Env {
   ASSETS: { fetch(request: Request): Promise<Response> };

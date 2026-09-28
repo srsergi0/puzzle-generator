@@ -8,7 +8,7 @@ import {
   samplePolygon,
   SubPath,
   toSvg,
-} from "../src/jigsaw.ts";
+} from "../src/jigsaw/index.ts";
 
 function points(path: SubPath): [number, number][] {
   const pts: [number, number][] = [[...path.start] as [number, number]];
@@ -74,6 +74,7 @@ describe("generate", () => {
       [5, 100, 300],
       [100, 5, 300],
       [10, 10, 600],
+      [60, 40, 2000],
       [120, 120, 4],
     ] as const) {
       const { rows, cols } = planGrid(n, w / h);
@@ -87,6 +88,16 @@ describe("generate", () => {
       expect(wavy).not.toContain("NaN");
       expect(wavy).not.toContain("Infinity");
     }
+  });
+
+  test("soporta hasta 2000 piezas sin errores ni desbordamientos", () => {
+    const puzzle = buildPuzzle(60, 40, 2000, { seed: 42 });
+    expect(puzzle.pieces.length).toBeGreaterThanOrEqual(1800);
+    expect(puzzle.pieces.length).toBeLessThanOrEqual(2200);
+    expect(puzzle.cuts.length).toBeGreaterThan(3000);
+    const svg = toSvg(puzzle);
+    expect(svg).toContain("<svg");
+    expect(svg).not.toContain("NaN");
   });
 
   test("las ondas son un campo global: deterministas y distintas de 0", () => {

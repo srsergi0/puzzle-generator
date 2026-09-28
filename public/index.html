@@ -144,8 +144,8 @@
       <div class="field">
         <div class="label">Número de piezas <span id="n-out"></span></div>
         <div class="pair">
-          <input type="range" data-pair="n" min="4" max="600" step="1" value="100" />
-          <input type="number" data-pair="n" min="4" max="600" step="1" value="100" />
+          <input type="range" data-pair="n" min="4" max="2000" step="1" value="100" />
+          <input type="number" data-pair="n" min="4" max="2000" step="1" value="100" />
         </div>
       </div>
 
@@ -155,6 +155,26 @@
           <option value="rect">Rectángulo</option>
           <option value="circle">Círculo</option>
         </select>
+        <input type="file" id="image-shape-input" accept="image/png, image/svg+xml, .png, .svg" style="display: none" />
+        <button type="button" id="upload-image-btn" style="margin-top: 4px; font-size: 13px; padding: 7px 10px; display: flex; align-items: center; justify-content: center; gap: 6px;">
+          🖼️ Cargar silueta (PNG / SVG)
+        </button>
+        <small id="image-shape-info" style="color: var(--muted); font-size: 11.5px; margin-top: 2px; display: none;"></small>
+        <div id="image-opacity-box" style="display: none; margin-top: 10px; background: var(--bg); padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line);">
+          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
+            <img id="img-thumb" src="" alt="Thumbnail" style="width: 32px; height: 32px; object-fit: contain; border-radius: 4px; background: #fff; border: 1px solid var(--line);" />
+            <div style="flex: 1;">
+              <div style="display: flex; justify-content: space-between; font-size: 12.5px; font-weight: 500;">
+                <span>Opacidad imagen</span>
+                <span id="img-opacity-out" style="color: var(--accent); font-weight: 600;">50%</span>
+              </div>
+            </div>
+          </div>
+          <div class="pair">
+            <input type="range" id="img-opacity" min="0" max="100" step="1" value="50" style="flex: 1;" />
+            <input type="number" id="img-opacity-num" min="0" max="100" step="1" value="50" style="width: 55px;" />
+          </div>
+        </div>
       </div>
 
       <div class="field">
