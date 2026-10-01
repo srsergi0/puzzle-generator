@@ -301,9 +301,20 @@ describe("toSvg", () => {
     expect(new Set(cutD).size).toBe(cutD.length);
   });
 
-  test("sin color todas las piezas son blancas", () => {
+  test("sin color solo se exportan los cortes: sin fondo ni rellenos duplicados", () => {
     const plain = toSvg(puzzle);
-    expect(plain.match(/fill="#ffffff"/g)?.length).toBeGreaterThanOrEqual(puzzle.pieces.length);
+    // Ni rectángulo blanco de fondo ni rellenos de pieza (ya van como corte).
+    expect(plain).not.toContain("<rect");
+    expect(plain).not.toContain('fill="#ffffff"');
+    expect(plain.match(/<path/g)?.length).toBe(puzzle.cuts.length);
+    // Las líneas de corte siguen siendo únicas.
+    const d = [...plain.matchAll(/<path d="([^"]*)"\/>/g)].map((m) => m[1]);
+    expect(new Set(d).size).toBe(d.length);
+  });
+
+  test("con color sí se rellenan las piezas y los cortes van aparte", () => {
+    expect(svg.match(/<path d="[^"]*" fill="#/g)?.length).toBe(puzzle.pieces.length);
+    expect(svg).not.toContain("<rect");
   });
 });
 

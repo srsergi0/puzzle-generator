@@ -124,7 +124,8 @@ Define `Piece`, `Puzzle`, `GenerateOptions` y `generate(widthCm, heightCm, rows,
 ### `svg.ts` — salida SVG y overlay fotográfico
 - `palette(count)`: colores armónicos distribuidos con el ángulo áureo (`0.618033...`).
 - `toSvg(puzzle, opts)`: serialización SVG 1:1 en milímetros reales.
-  - Genera rellenos sin trazo para evitar líneas dobles.
+  - Sin `color` exporta **solo los cortes**: ni rectángulo de fondo ni rellenos de pieza, que repetirían cada contorno ya trazado como corte.
+- Con `color` genera rellenos sin trazo para evitar líneas dobles en las caras compartidas (el fondo no se dibuja).
   - Soporta `imageOverlay` con `<defs><clipPath id="svg-image-clip">` para recortar la imagen exactamente a la silueta.
   - Capa de cortes láser nítidos encima de la imagen y numeración legible opcional.
 

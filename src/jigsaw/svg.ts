@@ -55,15 +55,17 @@ export function toSvg(puzzle: Puzzle, opts: SvgOptions = {}): string {
   const out: string[] = [
     `<svg xmlns="http://www.w3.org/2000/svg" width="${num(puzzle.widthCm)}cm"` +
       ` height="${num(puzzle.heightCm)}cm" viewBox="0 0 ${num(width)} ${num(height)}">`,
-    `<rect x="0" y="0" width="${num(width)}" height="${num(height)}" fill="#ffffff"/>`,
-    // Rellenos sin trazo: evita líneas dobles en las caras compartidas.
-    `<g fill-rule="nonzero" stroke="none">`,
   ];
-  puzzle.pieces.forEach((piece, i) => {
-    const fill = fills ? fills[i]! : "#ffffff";
-    out.push(`<path d="${piece.path.toD()}" fill="${fill}"/>`);
-  });
-  out.push("</g>");
+  // Sin color no se dibuja nada más que los cortes: ni rectángulo de fondo ni
+  // rellenos de pieza (que repetirían cada contorno ya trazado como corte).
+  // Rellenos sin trazo, para no duplicar las caras compartidas.
+  if (fills) {
+    out.push(`<g fill-rule="nonzero" stroke="none">`);
+    puzzle.pieces.forEach((piece, i) => {
+      out.push(`<path d="${piece.path.toD()}" fill="${fills[i]!}"/>`);
+    });
+    out.push("</g>");
+  }
 
   if (opts.imageOverlay && opts.imageOverlay.opacity > 0) {
     const { href, opacity, x, y, width: imgW, height: imgH, clipPathD } = opts.imageOverlay;
