@@ -14,6 +14,8 @@ export interface ImageShapeOptions {
   dataUrl?: string;
   origW?: number;
   origH?: number;
+  /** MIME type del archivo de origen (p. ej. image/jpeg) para elegir el decodificador. */
+  mime?: string;
 }
 
 /**
@@ -617,6 +619,25 @@ export function shapeFromPolygon(polygon: Point[], options: ImageShapeOptions = 
   };
 }
 
+/**
+ * Construye una forma rectangular con las proporciones naturales de la imagen,
+ * sin recortar la silueta: la lámina adopta la relación de aspecto de la imagen
+ * (la forma se centra y se inscribe dentro de la lámina).
+ */
+export function rectShapeFromImage(origW: number, origH: number, options: ImageShapeOptions = {}): Shape {
+  const w = Math.max(1e-6, origW);
+  const h = Math.max(1e-6, origH);
+  return shapeFromPolygon(
+    [
+      [0, 0],
+      [w, 0],
+      [w, h],
+      [0, h],
+    ],
+    { ...options, origW: w, origH: h },
+  );
+}
+
 function turnAngle(pPrev: Point, pCur: Point, pNext: Point): number {
   const d1x = pCur[0] - pPrev[0];
   const d1y = pCur[1] - pPrev[1];
@@ -726,12 +747,13 @@ export function shapeFromMask(mask: ImageMask, options: ImageShapeOptions = {}):
 
 async function decodeBrowser(
   bytes: Uint8Array,
+  mime = "image/png",
 ): Promise<{ width: number; height: number; rgba: Uint8Array | Uint8ClampedArray; origW: number; origH: number } | null> {
   if (typeof createImageBitmap === "undefined" || typeof Blob === "undefined") {
     return null;
   }
   try {
-    const blob = new Blob([bytes as unknown as BlobPart], { type: "image/png" });
+    const blob = new Blob([bytes as unknown as BlobPart], { type: mime });
     const bmp = await createImageBitmap(blob);
     const origW = bmp.width;
     const origH = bmp.height;
@@ -768,15 +790,28 @@ async function decodeBrowser(
 }
 
 /**
- * Flujo completo desde bytes de un archivo PNG:
- * PNG → RGBA → máscara → isla más grande → contorno simplificado → Shape (y registra la forma).
+ * Decodifica un raster (PNG, JPG, WebP…) a píxeles RGBA 8-bit.
+ * En el navegador usa createImageBitmap (soporta más formatos y da el tamaño natural);
+ * fuera del navegador cae al decodificador PNG puro.
+ */
+export async function decodeRaster(
+  bytes: Uint8Array,
+  mime = "image/png",
+): Promise<{ width: number; height: number; rgba: Uint8Array | Uint8ClampedArray; origW: number; origH: number }> {
+  const browserDecoded = await decodeBrowser(bytes, mime);
+  if (browserDecoded) return browserDecoded;
+  return decodePng(bytes);
+}
+
+/**
+ * Flujo completo desde bytes de un archivo raster (PNG / JPG):
+ * bytes → RGBA → máscara → isla más grande → contorno simplificado → Shape (y registra la forma).
  */
 export async function shapeFromPng(
   bytes: Uint8Array,
   options: ImageShapeOptions = {},
 ): Promise<Shape> {
-  const browserDecoded = await decodeBrowser(bytes);
-  const decoded = browserDecoded ?? (await decodePng(bytes));
+  const decoded = await decodeRaster(bytes, options.mime);
   const { width, height, rgba } = decoded;
   const origW = options.origW ?? decoded.origW;
   const origH = options.origH ?? decoded.origH;

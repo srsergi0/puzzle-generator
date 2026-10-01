@@ -5,7 +5,7 @@ const PROJECT = fileURLToPath(new URL("..", import.meta.url));
 const DEV_DIR = PROJECT + ".dev/";
 const PID_FILE = DEV_DIR + "dev.pid";
 const LOG_FILE = DEV_DIR + "dev.log";
-const PORT = Number(process.env.PORT ?? 4321);
+const PORT = Number(process.env.PORT ?? 4444);
 const URL_APP = `http://localhost:${PORT}`;
 
 const cmd = process.argv[2] ?? "status";

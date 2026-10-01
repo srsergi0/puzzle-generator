@@ -1,5 +1,13 @@
-import { shapeFromPng, shapeFromSvg } from "./image-shape.ts";
-import { buildPuzzle, toSvg, getShape, polygonPath, type Puzzle, type Shape } from "./jigsaw/index.ts";
+import { decodeRaster, maskFromRgba, rectShapeFromImage, shapeFromMask, shapeFromSvg } from "./image-shape.ts";
+import {
+  buildPuzzle,
+  getShape,
+  polygonPath,
+  registerShape,
+  toSvg,
+  type Puzzle,
+  type Shape,
+} from "./jigsaw/index.ts";
 
 const $ = <T extends Element>(sel: string): T => {
   const el = document.querySelector<T>(sel);
@@ -17,6 +25,9 @@ const styleSelect = $<HTMLSelectElement>("#style");
 const imageInput = $<HTMLInputElement>("#image-shape-input");
 const uploadBtn = $<HTMLButtonElement>("#upload-image-btn");
 const imageInfo = $<HTMLElement>("#image-shape-info");
+const imageModeBox = $<HTMLDivElement>("#image-mode-box");
+const silhouetteInput = $<HTMLInputElement>("#use-silhouette");
+const fitSheetBtn = $<HTMLButtonElement>("#fit-sheet-btn");
 const imageOpacityBox = $<HTMLDivElement>("#image-opacity-box");
 const imgThumb = $<HTMLImageElement>("#img-thumb");
 const imgOpacityRange = $<HTMLInputElement>("#img-opacity");
@@ -24,6 +35,113 @@ const imgOpacityNum = $<HTMLInputElement>("#img-opacity-num");
 const imgOpacityOut = $<HTMLElement>("#img-opacity-out");
 
 let currentImageUrl: string | null = null;
+
+/** Imagen ya procesada: guarda ambas variantes para alternar sin volver a decodificar. */
+interface LoadedImage {
+  label: string;
+  kind: string;
+  isSvg: boolean;
+  origW: number;
+  origH: number;
+  silhouette: Shape | null;
+  rect: Shape | null;
+  silhouetteError: string | null;
+}
+
+let loadedImage: LoadedImage | null = null;
+
+function fileKind(file: File, isSvg: boolean): string {
+  if (isSvg) return "SVG";
+  const ext = (file.name.toLowerCase().split(".").pop() ?? "") as string;
+  if (ext === "jpg" || ext === "jpeg" || file.type === "image/jpeg") return "JPG";
+  if (ext === "png" || file.type === "image/png") return "PNG";
+  if (ext === "webp" || file.type === "image/webp") return "WEBP";
+  return file.type.replace(/^image\//, "").toUpperCase() || "Imagen";
+}
+
+function imageOption(): HTMLOptionElement {
+  let opt = shapeSelect.querySelector<HTMLOptionElement>('option[value="image"]');
+  if (!opt) {
+    opt = document.createElement("option");
+    opt.value = "image";
+    shapeSelect.appendChild(opt);
+  }
+  return opt;
+}
+
+/** Muestra/oculta los controles dependientes de la imagen cargada. */
+function syncImageBoxes(): void {
+  const img = loadedImage;
+  const active = shapeSelect.value === "image" && img !== null;
+  imageModeBox.style.display = active && img !== null && !img.isSvg ? "block" : "none";
+  imageOpacityBox.style.display = active && currentImageUrl ? "block" : "none";
+  fitSheetBtn.style.display =
+    active && img !== null && img.rect !== null && !silhouetteInput.checked ? "block" : "none";
+}
+
+/**
+ * Registra y activa la variante de forma elegida (silueta o rectángulo con las
+ * proporciones de la imagen) y actualiza la UI asociada.
+ */
+function applyImageShape(): void {
+  const img = loadedImage;
+  if (!img) return;
+
+  const useSilhouette = img.silhouette !== null && (img.rect === null || silhouetteInput.checked);
+  const shape = (useSilhouette ? img.silhouette : img.rect) ?? img.silhouette;
+  if (!shape) return;
+
+  registerShape(shape);
+  const opt = imageOption();
+  opt.textContent = useSilhouette ? `🖼️ ${img.label}` : `🖼️ ${img.label} (rectángulo)`;
+  shapeSelect.value = "image";
+
+  const dims = `${Math.round(img.origW)}×${Math.round(img.origH)}`;
+  if (useSilhouette) {
+    imageInfo.textContent = `Silueta: ${img.label} (${img.kind} · ${dims} px)`;
+  } else if (img.silhouetteError) {
+    imageInfo.textContent = `Sin silueta extraíble → rectángulo ${dims} · ${img.kind}`;
+  } else {
+    imageInfo.textContent = `Rectángulo con proporciones de la imagen: ${img.label} (${img.kind} · ${dims} px)`;
+  }
+  imageInfo.style.display = "block";
+
+  syncImageBoxes();
+  schedule(0);
+}
+
+function setPair(kind: string, value: number): void {
+  const raw = String(value);
+  for (const el of pairInputs(kind)) el.value = raw;
+}
+
+/**
+ * Ajusta la lámina (ancho × largo) a la proporción de la imagen cargada,
+ * encajándola dentro de las medidas actuales ("contain": nunca agranda la lámina).
+ */
+function fitSheetToImage(): void {
+  const img = loadedImage;
+  if (!img || img.origW <= 0 || img.origH <= 0) return;
+
+  const aspect = img.origW / img.origH;
+  const wInputs = pairInputs("w");
+  const hInputs = pairInputs("h");
+  const lo = Number(wInputs[0]!.min);
+  const hi = Number(wInputs[0]!.max);
+  const step = Number(wInputs[0]!.step) || 0.5;
+  const round = (v: number): number => clamp(Math.round(v / step) * step, lo, hi);
+
+  const w0 = Number(wInputs[0]!.value);
+  const h0 = Number(hInputs[0]!.value);
+  const w = round(Math.min(w0, h0 * aspect));
+  const h = round(w / aspect);
+
+  setPair("w", w);
+  setPair("h", h);
+  updateOutBadge("w", w);
+  updateOutBadge("h", h);
+  schedule(0);
+}
 
 const out: Record<"w" | "h" | "n" | "wave" | "minArea" | "maxArea", HTMLElement> = {
   w: $<HTMLElement>("#w-out"),
@@ -282,40 +400,57 @@ imageInput.addEventListener("change", async () => {
     imgThumb.src = currentImageUrl;
 
     const isSvg = file.type === "image/svg+xml" || file.name.toLowerCase().endsWith(".svg");
-    const label = file.name.replace(/\.[^.]+$/, "") || (isSvg ? "SVG" : "PNG");
-    let shape: Shape;
+    const label = file.name.replace(/\.[^.]+$/, "") || (isSvg ? "SVG" : "Imagen");
+    const kind = fileKind(file, isSvg);
+    const opts = { id: "image", label, dataUrl: currentImageUrl };
+
+    let silhouette: Shape | null = null;
+    let rect: Shape | null = null;
+    let silhouetteError: string | null = null;
+    let origW = 0;
+    let origH = 0;
 
     if (isSvg) {
-      const text = await file.text();
-      shape = shapeFromSvg(text, { id: "image", label, dataUrl: currentImageUrl });
+      // El SVG ya ES su propio trazado: no hay variante "rectángulo".
+      silhouette = shapeFromSvg(await file.text(), opts);
+      origW = silhouette.imageMeta?.origW ?? 0;
+      origH = silhouette.imageMeta?.origH ?? 0;
     } else {
       const bytes = new Uint8Array(await file.arrayBuffer());
-      shape = await shapeFromPng(bytes, { id: "image", label, dataUrl: currentImageUrl });
+      const decoded = await decodeRaster(bytes, file.type || "image/png");
+      origW = decoded.origW;
+      origH = decoded.origH;
+      try {
+        silhouette = shapeFromMask(maskFromRgba(decoded.width, decoded.height, decoded.rgba), {
+          ...opts,
+          origW,
+          origH,
+        });
+      } catch (err) {
+        // JPG sin silueta reconocible (fondo uniforme, etc.): se sigue pudiendo usar el rectángulo.
+        silhouetteError = err instanceof Error ? err.message : String(err);
+      }
+      rect = rectShapeFromImage(origW, origH, { ...opts, origW, origH });
     }
 
-    let opt = shapeSelect.querySelector<HTMLOptionElement>('option[value="image"]');
-    if (!opt) {
-      opt = document.createElement("option");
-      opt.value = "image";
-      shapeSelect.appendChild(opt);
-    }
-    opt.textContent = `🖼️ ${shape.label}`;
-    shapeSelect.value = "image";
+    loadedImage = { label, kind, isSvg, origW, origH, silhouette, rect, silhouetteError };
+    silhouetteInput.disabled = silhouette === null || rect === null;
+    if (silhouette === null) silhouetteInput.checked = false;
 
-    imageInfo.textContent = `Silueta: ${shape.label} (${isSvg ? "SVG" : "PNG"})`;
-    imageInfo.style.display = "block";
-    imageOpacityBox.style.display = "block";
+    applyImageShape();
     errorEl.style.display = "none";
-    schedule();
   } catch (err) {
     errorEl.textContent = `Error al procesar el archivo: ${err instanceof Error ? err.message : String(err)}`;
     errorEl.style.display = "block";
   } finally {
     uploadBtn.disabled = false;
-    uploadBtn.textContent = "🖼️ Cargar silueta (PNG / SVG)";
+    uploadBtn.textContent = "🖼️ Cargar imagen (PNG / JPG / SVG)";
     imageInput.value = "";
   }
 });
+
+silhouetteInput.addEventListener("change", () => applyImageShape());
+fitSheetBtn.addEventListener("click", () => fitSheetToImage());
 
 function onOpacityChange(valStr: string): void {
   const val = clamp(Number(valStr) || 0, 0, 100);
@@ -339,7 +474,7 @@ seedInput.addEventListener("change", () => schedule(0));
 colorInput.addEventListener("change", () => schedule(0));
 numbersInput.addEventListener("change", () => schedule(0));
 shapeSelect.addEventListener("change", () => {
-  imageOpacityBox.style.display = shapeSelect.value === "image" && currentImageUrl ? "block" : "none";
+  syncImageBoxes();
   schedule(0);
 });
 styleSelect.addEventListener("change", () => schedule(0));

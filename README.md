@@ -11,6 +11,7 @@
 - **Medidas en cm → SVG a escala real**: `30 cm` se dibuja como `300 mm`, sin reescalados.
 - **Número de piezas exacto**: el algoritmo fusiona celdas hasta alcanzar el objetivo sin dejar huecos (`piezas descartadas = 0`).
 - **Tres formas**: rectángulo, círculo u **orgánico** (contorno ondulado tipo marea, deformado al final para que las piezas sigan cubriendo exactamente el borde).
+- **Imagen con o sin silueta**: carga un PNG, JPG o SVG y decide tú: recortar la **silueta** de la imagen o usar un **rectángulo con las proporciones de la imagen** (con botón para ajustar la lámina a esa proporción).
 - **Pestañas de puzzle clásicas**: cuello estrecho y cabeza bulbosa (undercut), con altura limitada por el tamaño de la celda para que nunca invadan la pieza vecina. Cada lado alterna muesca ranura.
 - **Estilo "Serpiente"**: cortes orgánicos con lóbulos irregulares que se alternan lado a lado (brazos con bombillo, como en un puzzle de madera), con reglas geométricas que garantizan que ninguna curva se cruce ni salga del contorno. Se aplica a cualquier forma.
 - **Ondas globales**: un campo de senos ondula *todos* los cortes por igual, así las dos piezas vecinas comparten exactamente la misma curva.
@@ -24,11 +25,11 @@
 
 ```bash
 bun install
-bun run dev        # → http://localhost:4321
+bun run dev        # → http://localhost:4444
 ```
 
 ```bash
-bun test           # 37 tests
+bun test           # 46 tests
 bun run typecheck  # TypeScript estricto
 ```
 
@@ -59,7 +60,7 @@ GET /api/puzzle.svg?w=30&h=20&n=48&shape=circle&seed=42&wave=0.5&color=1&numbers
 |---|---|
 | `src/grid.ts` | `planGrid(target, aspect)` → filas × columnas |
 | `src/jigsaw/` | motor del puzzle fragmentado por responsabilidades (ver `BITACORA.md`) |
-| `src/image-shape.ts` | siluetas desde PNG: decodificación, contorno, `Shape` |
+| `src/image-shape.ts` | siluetas desde PNG/JPG (decodificación, contorno) y rectángulo con las proporciones de la imagen → `Shape` |
 | `src/organic.ts` | forma "orgánica" (contorno ondulado) y estilo "serpiente" (auto-registrados) |
 | `src/server.ts` | `Bun.serve`, bundle del cliente al vuelo, recarga en vivo |
 | `src/client.ts` | interfaz: controles, previsualización, métricas, descarga |
@@ -84,8 +85,9 @@ GET /api/puzzle.svg?w=30&h=20&n=48&shape=circle&seed=42&wave=0.5&color=1&numbers
 - **Organic sheet shape** — a wavy, tide-like outline applied as a final bijective warp, so pieces still tile it exactly.
 - **Optional global waves** that distort every cut consistently on both sides of a joint.
 - **Rectangle, circle or organic** sheet shapes with a true vector outline.
+- **Image shapes** — load a PNG/JPG/SVG and pick either the traced **silhouette** or a **rectangle with the image's own proportions** (one click to fit the sheet to that ratio).
 - **Single-pass cuts** — no duplicated lines, no guide lines, no ghost lines.
-- Coloured and numbered preview, live reload dev server, strict TypeScript, 37 tests.
+- Coloured and numbered preview, live reload dev server, strict TypeScript, 46 tests.
 
 ### Keywords
 

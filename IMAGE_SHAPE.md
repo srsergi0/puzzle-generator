@@ -1,4 +1,4 @@
-# Nueva forma: desde imagen (PNG)
+# Nueva forma: desde imagen (PNG / JPG / SVG)
 
 ## Objetivo
 
@@ -41,3 +41,25 @@ la silueta **se carga desde un PNG**.
 - Cargar un PNG con varias islas → solo se usa la mayor.
 - Las piezas cubren exactamente la silueta y no se salen de ella.
 - `bun run typecheck && bun test` siguen en verde.
+
+## Modo: silueta o rectángulo con las proporciones de la imagen
+
+Al cargar un **PNG o JPG**, la interfaz muestra el checkbox **«Usar silueta de la imagen»**:
+
+- **Marcado** (por defecto): el comportamiento original — se extrae la silueta y esa es la
+  forma de la lámina.
+- **Desmarcado**: la forma es un **rectángulo con la relación de aspecto de la imagen**
+  (`rectShapeFromImage(origW, origH)`), sin recortar el fondo. Sirve cuando sólo interesa
+  que la lámina tenga las proporciones de la foto.
+
+Detalles:
+
+- Las **dos variantes se calculan una sola vez** al cargar el archivo; alternar es
+  instantáneo (sin volver a decodificar) y no se pierde la preferencia al cargar otra imagen.
+- El overlay de la imagen sigue alineado al 100 %: en modo rectángulo
+  `minX = minY = 0` y `boxW/boxH = origW/origH`, así que la foto llena exactamente el recorte.
+- Botón **«Ajustar lámina a la imagen»**: recalcula ancho × largo con la proporción de la
+  imagen, encajándola dentro de las medidas actuales (nunca agranda la lámina).
+- Si **no se puede extraer la silueta** (p. ej. un JPG de fondo uniforme) no hay error:
+  se cae al rectángulo y el checkbox queda deshabilitado, explicando el motivo.
+- Los **SVG** no muestran el checkbox: su trazado ya es la forma.

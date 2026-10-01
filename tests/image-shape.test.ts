@@ -3,17 +3,19 @@ import { readFileSync } from "node:fs";
 import { deflateSync } from "node:zlib";
 import {
   decodePng,
+  decodeRaster,
   keepLargestIsland,
   maskFromRgba,
   maskToContour,
   parseSvgPath,
+  rectShapeFromImage,
   shapeFromMask,
   shapeFromPng,
   shapeFromSvg,
   simplifyPolygon,
   smoothBezierPolygon,
 } from "../src/image-shape.ts";
-import { buildPuzzle, polygonArea, samplePolygon, toSvg } from "../src/jigsaw/index.ts";
+import { buildPuzzle, polygonArea, registerShape, samplePolygon, toSvg } from "../src/jigsaw/index.ts";
 
 /** Helper para generar buffers PNG válidos en memoria para pruebas. */
 function createPng(
@@ -413,5 +415,107 @@ describe("image-shape: generación de puzzle", () => {
     expect(() => shapeFromSvg(emptySvg)).toThrow(
       "No se encontró ningún trazado (<path> o <polygon>) en el archivo SVG",
     );
+  });
+});
+
+describe("image-shape: rectángulo con las proporciones de la imagen", () => {
+  /** Devuelve la caja [minX, minY, maxX, maxY] de un polígono de recorte. */
+  function bbox(pts: ReadonlyArray<readonly [number, number]>): [number, number, number, number] {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const [x, y] of pts) {
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x > maxX) maxX = x;
+      if (y > maxY) maxY = y;
+    }
+    return [minX, minY, maxX, maxY];
+  }
+
+  test("decodeRaster devuelve los píxeles y el tamaño natural de la imagen", async () => {
+    const png = createPng(30, 20, () => [10, 20, 30, 255]);
+    const { width, height, origW, origH } = await decodeRaster(png, "image/png");
+    expect(width).toBe(30);
+    expect(height).toBe(20);
+    expect(origW).toBe(30);
+    expect(origH).toBe(20);
+  });
+
+  test("mantiene la proporción de la imagen y se centra en la lámina", () => {
+    const shape = rectShapeFromImage(400, 300, { id: "test-img-rect" });
+    expect(shape.id).toBe("test-img-rect");
+
+    // Lámina cuadrada 300×300 mm → el rectángulo 4:3 debe medir 300×225 y quedar centrado en Y
+    const [minX, minY, maxX, maxY] = bbox(shape.clip(300, 300));
+    const w = maxX - minX;
+    const h = maxY - minY;
+    expect(Math.abs(w / h - 400 / 300)).toBeLessThan(1e-6);
+    expect(minX).toBeCloseTo(0, 6);
+    expect(maxX).toBeCloseTo(300, 6);
+    expect(minY).toBeCloseTo(37.5, 6);
+    expect(maxY).toBeCloseTo(262.5, 6);
+  });
+
+  test("imageMeta cubre la imagen entera: el overlay encaja exacto en el clip", () => {
+    const shape = rectShapeFromImage(800, 600, {
+      id: "test-img-rect-meta",
+      dataUrl: "data:image/jpeg;base64,test",
+    });
+    const meta = shape.imageMeta!;
+    expect(meta).toBeDefined();
+    expect(meta.origW).toBe(800);
+    expect(meta.origH).toBe(600);
+    expect(meta.minX).toBe(0);
+    expect(meta.minY).toBe(0);
+    expect(meta.boxW).toBe(meta.origW);
+    expect(meta.boxH).toBe(meta.origH);
+
+    // Mismo cálculo que hace el cliente para colocar la imagen superpuesta
+    const sheetW = 400;
+    const sheetH = 400;
+    const scale = Math.min(sheetW / meta.boxW, sheetH / meta.boxH);
+    const offsetX = (sheetW - meta.boxW * scale) / 2;
+    const offsetY = (sheetH - meta.boxH * scale) / 2;
+    const overlayX = offsetX - meta.minX * scale;
+    const overlayY = offsetY - meta.minY * scale;
+    expect(overlayX).toBeCloseTo(offsetX, 6);
+    expect(overlayY).toBeCloseTo(offsetY, 6);
+    expect(meta.origW * scale).toBeCloseTo(meta.boxW * scale, 6);
+    expect(meta.origH * scale).toBeCloseTo(meta.boxH * scale, 6);
+
+    // El recorte de la forma coincide con el rectángulo de la imagen
+    const [cx0, cy0, cx1, cy1] = bbox(shape.clip(sheetW, sheetH));
+    expect(cx0).toBeCloseTo(offsetX, 6);
+    expect(cy0).toBeCloseTo(offsetY, 6);
+    expect(cx1 - cx0).toBeCloseTo(meta.boxW * scale, 6);
+    expect(cy1 - cy0).toBeCloseTo(meta.boxH * scale, 6);
+  });
+
+  test("sin silueta se cubre toda la caja; con silueta (diamante) se recorta el fondo", async () => {
+    const png = createPng(50, 50, (x, y) =>
+      Math.abs(x - 25) + Math.abs(y - 25) <= 18 ? [0, 0, 0, 255] : [0, 0, 0, 0],
+    );
+    const silhouette = await shapeFromPng(png, { id: "test-diamond-for-rect" });
+    const rect = rectShapeFromImage(50, 50, { id: "test-diamond-rect" });
+    registerShape(rect);
+
+    const sheet = 200;
+    const rectArea = polygonArea(rect.clip(sheet, sheet));
+    const silArea = polygonArea(silhouette.clip(sheet, sheet));
+    expect(rectArea).toBeCloseTo(sheet * sheet, 3); // ocupa la caja completa
+    expect(silArea).toBeLessThan(rectArea * 0.7); // el diamante deja las esquinas fuera
+
+    // El puzzle con la forma rectangular sí llega a las esquinas de la lámina
+    const puzzle = buildPuzzle(20, 20, 25, { shape: "test-diamond-rect", seed: 5, minArea: 0 });
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const piece of puzzle.pieces) {
+      for (const [x, y] of samplePolygon(piece.path, 4)) {
+        if (x > maxX) maxX = x;
+        if (y > maxY) maxY = y;
+      }
+    }
+    expect(maxX).toBeGreaterThan(sheet * 0.97);
+    expect(maxY).toBeGreaterThan(sheet * 0.97);
+    expect(puzzle.pieces.length).toBeGreaterThan(0);
   });
 });
